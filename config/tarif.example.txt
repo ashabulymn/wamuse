@@ -1,0 +1,12 @@
+# TEMPLATE daftar tarif — GANTI semua harga contoh di bawah dengan tarifmu sendiri.
+# Format: NAMA JASA | HARGA | KETERANGAN (opsional)
+# Aturan dari prompt standby:
+# - JANGAN langsung kirim daftar ini ke klien; gali dulu kebutuhannya (discovery).
+# - SEBELUM mengutip tarif ke klien, konfirmasi dulu ke owner (eskalasi).
+# - Item bertanda (usulan) TIDAK punya harga pasti -> JANGAN dikutip, eskalasikan.
+#
+# Contoh (BUKAN harga asli, hanya format):
+Jasa A | Rp1.000.000 | contoh paket dasar
+Jasa B | Rp4.000.000 | contoh paket standar
+Jasa C | Rp8.000.000 | contoh paket lanjutan
+Jasa D (usulan) | - | belum ada harga pasti, eskalasikan ke owner

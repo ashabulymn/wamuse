@@ -1,0 +1,5 @@
+# Salin file ini menjadi n8n-bridge.conf dan isi placeholder-nya.
+# JANGAN commit file n8n-bridge.conf yang sudah terisi ke repo publik.
+# Token A dipakai bersama oleh inbox, outbox, dan queue-ops (sama seperti sistem asal).
+INBOX_URL=https://<YOUR_N8N_DOMAIN>/webhook/muse-inbox-<TOKEN_A>
+OUTBOX_URL=https://<YOUR_N8N_DOMAIN>/webhook/muse-outbox-<TOKEN_A>
