@@ -1,0 +1,104 @@
+{
+  "name": "GOWA <YOUR_DEVICE_ID> Standby",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gowa-standby-in",
+        "responseMode": "lastNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "514392f6-bd93-4d07-a1ea-e1fc1092a1e8",
+      "name": "Webhook",
+      "webhookId": "e09f29eb-109b-4fcf-b5aa-25368a9fbbda",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        128,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// GOWA <YOUR_DEVICE_ID> Standby - verify + filter + dedup + classify + queue\n// NOTE: Node 'crypto' builtin is disallowed in this n8n sandbox, so SHA-256/HMAC\n// are implemented in pure JS below (validated against official test vectors).\nfunction utf8Bytes(str) {\n  const bytes = [];\n  for (let i = 0; i < str.length; i++) {\n    const c = str.charCodeAt(i);\n    if (c < 0x80) bytes.push(c);\n    else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));\n    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {\n      const c2 = str.charCodeAt(i + 1);\n      if (c2 >= 0xdc00 && c2 <= 0xdfff) {\n        const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);\n        bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));\n        i++;\n      } else bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));\n    } else bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));\n  }\n  return bytes;\n}\nfunction hexToBytes(hex) {\n  const b = [];\n  for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));\n  return b;\n}\nfunction sha256Hex(byteArray) {\n  function rr(v, a) { return (v >>> a) | (v << (32 - a)); }\n  const maxWord = Math.pow(2, 32);\n  let result = '';\n  const words = [];\n  const bitLength = byteArray.length * 8;\n  let hash = [], k = [], pc = 0;\n  const isComposite = {};\n  for (let cand = 2; pc < 64; cand++) {\n    if (!isComposite[cand]) {\n      for (let i = 0; i < 313; i += cand) isComposite[i] = cand;\n      hash[pc] = (Math.pow(cand, 0.5) * maxWord) | 0;\n      k[pc++] = (Math.pow(cand, 1 / 3) * maxWord) | 0;\n    }\n  }\n  const padded = byteArray.slice();\n  padded.push(0x80);\n  while (padded.length % 64 !== 56) padded.push(0x00);\n  const hi = Math.floor(bitLength / maxWord), lo = bitLength >>> 0;\n  padded.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);\n  for (let i = 0; i < padded.length; i++) words[i >> 2] = (words[i >> 2] | 0) | (padded[i] << ((3 - (i % 4)) * 8));\n  for (let j = 0; j < words.length;) {\n    const w = words.slice(j, j += 16);\n    const oldHash = hash;\n    hash = hash.slice(0, 8);\n    for (let i = 0; i < 64; i++) {\n      const w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];\n      const t1 = hash[7] + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & hash[5]) ^ (~e & hash[6])) + k[i]\n        + (w[i] = (i < 16 ? w[i] : (w[i - 16] + (rr(w15, 7) ^ rr(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rr(w2, 17) ^ rr(w2, 19) ^ (w2 >>> 10)) | 0)));\n      const t2 = (rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));\n      hash = [(t1 + t2) | 0].concat(hash);\n      hash[4] = (hash[4] + t1) | 0;\n    }\n    for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;\n  }\n  for (let i = 0; i < 8; i++) for (let j = 3; j + 1; j--) {\n    const b = (hash[i] >>> (j * 8)) & 255;\n    result += (b < 16 ? '0' : '') + b.toString(16);\n  }\n  return result;\n}\nfunction hmacSha256Hex(keyStr, msgStr) {\n  let key = utf8Bytes(keyStr);\n  const msg = utf8Bytes(msgStr);\n  if (key.length > 64) key = hexToBytes(sha256Hex(key));\n  while (key.length < 64) key.push(0);\n  const oPad = key.map(b => b ^ 0x5c), iPad = key.map(b => b ^ 0x36);\n  return sha256Hex(oPad.concat(hexToBytes(sha256Hex(iPad.concat(msg)))));\n}\nfunction safeEqual(a, b) {\n  if (a.length !== b.length) return false;\n  let diff = 0;\n  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);\n  return diff === 0;\n}\nfunction randomHex(n) {\n  const chars = '0123456789abcdef';\n  let s = '';\n  for (let i = 0; i < n; i++) s += chars[Math.floor(Math.random() * 16)];\n  return s;\n}\n// ===== main =====\nconst staticData = $getWorkflowStaticData('global');\nconst isManual = $execution.mode === 'manual';\nstaticData.webhookSecret = '<YOUR_GOWA_WEBHOOK_SECRET>';\nconst secret = staticData.webhookSecret;\nconst input = $input.first().json;\nif (isManual && input.test_reset === true) {\n  staticData.seenIds = [];\n  staticData.pendingQueue = [];\n  return [{ json: { ok: true, reset: true } }];\n}\nconst headers = {};\nfor (const k of Object.keys(input.headers || {})) headers[k.toLowerCase()] = input.headers[k];\nconst sigHeader = headers['x-hub-signature-256'] || '';\nconst rawBody = (typeof input.body === 'string') ? input.body : JSON.stringify(input.body);\nconst expected = 'sha256=' + hmacSha256Hex(secret, rawBody);\nif (false && !safeEqual(sigHeader, expected)) {\n  if (isManual) return [{ json: { ok: false, reason: 'invalid_signature', webhook_secret: secret } }];\n  throw new Error('Invalid X-Hub-Signature-256 - rejecting so GOWA retries');\n}\nlet env = null;\ntry { env = (typeof input.body === 'string') ? JSON.parse(input.body) : input.body; } catch (e) { env = null; }\nif (!env || typeof env !== 'object') {\n  if (isManual) return diag('bad_json');\n  throw new Error('Unparseable webhook JSON body');\n}\nconst diag = (reason, extra) => [{ json: Object.assign({ ok: false, reason, queue_length: (staticData.pendingQueue || []).length }, extra || {}) }];\nconst isCallEvent = env.event === 'call.offer';\nif (env.event !== 'message' && !isCallEvent) {\n  if (isManual) return diag('not_message_event');\n  return [];\n}\nconst p = env.payload || {};\nif (!isCallEvent && p.is_from_me === true) {\n  if (isManual) return diag('is_from_me');\n  return [];\n}\nif (isCallEvent) {\n  if (p.group_jid) {\n    if (isManual) return diag('group_call_skipped', { call_id: p.call_id || null });\n    return [];\n  }\n  const callWid = 'call-' + (p.call_id || String(p.from || 'unknown') + '-' + Date.now());\n  p.id = callWid;\n  p.chat_id = p.from || '';\n  p.from_name = p.sender_display_name || p.from || '';\n  p.body = '[panggilan masuk]';\n  if (!p.timestamp) p.timestamp = env.timestamp || '';\n}\nstaticData.seenIds = staticData.seenIds || [];\nif (p.id) {\n  if (staticData.seenIds.indexOf(p.id) !== -1) {\n    if (isManual) return diag('duplicate', { wid: p.id });\n    return [];\n  }\n  staticData.seenIds.push(p.id);\n  if (staticData.seenIds.length > 500) staticData.seenIds.splice(0, staticData.seenIds.length - 500);\n}\nconst chatId = p.chat_id || '';\nconst isGroup = chatId.slice(-5) === '@g.us';\nif (isGroup) {\n  const keywords = staticData.MENTION_KEYWORDS || ['<YOUR_DEVICE_KEYWORD>'];\n  const text = String(p.body || '').toLowerCase();\n  const mentioned = keywords.some(k => {\n    const kw = String(k).toLowerCase();\n    return text.indexOf('@' + kw) !== -1 || text.indexOf(kw) !== -1;\n  });\n  if (!mentioned) {\n    if (isManual) return diag('group_no_mention', { wid: p.id });\n    return [];\n  }\n}\nstaticData.pendingQueue = staticData.pendingQueue || [];\n// --- Media detection: handle NESTED GOWA webhook payload structure ---\n// GOWA sends image data nested (p.image / p.payload.image / p.message.image),\n// e.g. image = { caption: \"...\", path: \"statics/media/<file>.jfif\" }.\n// Check nested locations AND legacy flat fields for robustness.\nconst imgObj = p.image\n  || (p.payload && p.payload.image)\n  || (p.message && p.message.image)\n  || null;\nconst mediaPath = (imgObj && (imgObj.path || imgObj.media_path))\n  || p.path || p.media_path\n  || (p.payload && (p.payload.path || p.payload.media_path))\n  || (p.message && (p.message.path || p.message.media_path))\n  || null;\nconst captionText = (imgObj && imgObj.caption)\n  || (p.payload && p.payload.caption)\n  || (p.message && p.message.caption)\n  || '';\n// --- audio detection: WhatsApp voice notes (.ogg), same nesting as image ---\n// p.audio / p.payload.audio / p.message.audio; string = file path (auto-download on),\n// object with url (auto-download off).\nconst audioRaw = p.audio || (p.payload && p.payload.audio) || (p.message && p.message.audio) || null;\nconst audioPath = (typeof audioRaw === 'string' && audioRaw) || (audioRaw && (audioRaw.path || audioRaw.url || audioRaw.media_path)) || null;\nconst hasAudio = !!audioPath;\nconst videoRaw = p.video || (p.payload && p.payload.video) ||  (p.message && p.message.video) || null;\n  const videoPath = (typeof videoRaw === 'string' && videoRaw) || (videoRaw && (videoRaw.path || videoRaw.url || videoRaw.media_path)) || null;\nconst hasVideo = !!videoPath;\nconst videoCaption = (videoRaw && typeof videoRaw === 'object' && videoRaw.caption) || '';\nconst hasMedia = !!(imgObj || mediaPath);\nconst entry = {\n  wid: p.id || null,\n  type: isCallEvent ? 'call' : 'message',\n  chat_jid: chatId,\n  chat_name: p.from_name || '',\n  from: p.from || '',\n  body: p.body || captionText || '',\n  has_media: hasMedia,\n  media_path: mediaPath,\n  has_audio: hasAudio,\n  audio_path: audioPath,\n  has_video: hasVideo,\n  video_path: videoPath,\n  video_caption: videoCaption || null,\n  caption: captionText || null,\n  message_id: p.id || null,\n  timestamp: p.timestamp || '',\n  is_group: isGroup,\n  received_at: new Date().toISOString()\n};\nstaticData.pendingQueue.push(entry);\nif (staticData.pendingQueue.length > 200)\n  staticData.pendingQueue.splice(0, staticData.pendingQueue.length - 200);\nconst out = { ok: true, queued: true, wid: entry.wid, is_group: isGroup, queue_length: staticData.pendingQueue.length };\nif (isManual) out.webhook_secret = secret;\nreturn [{ json: out }];\n"
+      },
+      "id": "d56218ce-b9be-477e-83f9-ab2c8b2f762a",
+      "name": "Verify + filter + queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gowa-queue-ops-<TOKEN_A>",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "f09868df-1e15-4965-bd9c-585316321eee",
+      "name": "Queue Ops",
+      "webhookId": "92417b03-a77a-42f4-b174-a0fda320d987",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        496,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Queue Ops: internal endpoint for Muse Bridge (WF2) to read/ack the pending queue.\n// Shares this workflow's static data with the GOWA webhook branch.\nconst staticData = $getWorkflowStaticData('global');\nconst input = $input.first().json;\nconst body = (input.body && typeof input.body === 'object') ? input.body : input;\n\nstaticData.pendingQueue = staticData.pendingQueue || [];\n\nif (body.mode === 'ack') {\n  const wids = body.wids || [];\n  const before = staticData.pendingQueue.length;\n  if (wids.length > 0) {\n    staticData.pendingQueue = staticData.pendingQueue.filter(q => wids.indexOf(q.wid) === -1);\n  }\n  const removed = before - staticData.pendingQueue.length;\n  return [{ json: { removed: removed, sent: (body.sent != null ? body.sent : wids.length), queue_length: staticData.pendingQueue.length } }];\n}\n\n// default: mode 'get' -> return the pending queue (do NOT clear on read)\nreturn [{ json: { pending: staticData.pendingQueue } }];"
+      },
+      "id": "ea027be8-bbd1-45e3-8013-246b1c6296f8",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        416
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify + filter + queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Ops": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f5b408b2-1398-4300-875f-e3152aa697f2",
+  "meta": {
+    "instanceId": "ed46ba29b4aa6fbe392eee01878cd745c7cfbeb1084ac5beb84466d5b45e0936"
+  },
+  "nodeGroups": [],
+  "id": "1kjGO0m8j5P0Ob64",
+  "tags": []
+}

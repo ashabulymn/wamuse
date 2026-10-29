@@ -1,0 +1,680 @@
+{
+  "name": "Muse Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "muse-inbox-<TOKEN_A>",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1ec6a190-4efb-454c-90cc-2afc98b24e8a",
+      "name": "Muse Inbox",
+      "webhookId": "cc2e4d4d-796c-47ec-ab93-e6dbce498c78",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://<YOUR_N8N_DOMAIN>/webhook/gowa-queue-ops-<TOKEN_A>",
+        "options": {}
+      },
+      "id": "9e2b2546-f59b-4237-8bad-662ee80c65de",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return the pending queue fetched from WF1's queue-ops endpoint.\n// The HTTP node output is the JSON returned by that endpoint: {pending: [...]}.\n// Do NOT clear the queue on read - acking happens via the outbox flow.\nconst data = $input.first().json;\nreturn [{ json: { pending: data.pending || [] } }];"
+      },
+      "id": "9236c012-dd7d-476c-90e2-0746f36472de",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "muse-outbox-<TOKEN_A>",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "8396a92f-7b12-410c-b2c9-297b72fe4f68",
+      "name": "Muse Outbox",
+      "webhookId": "6da7e2fd-7f1d-409b-b97e-290febb5607a",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build one send-request item per outbox item.\n// body.items = [{wid, action: 'reply'|'escalate', to, message, file_url?, file_type?}]\n// file_type: 'image' -> /send/image, anything else -> /send/file\nconst input = $input.first().json;\nconst body = (input.body && typeof input.body === 'object') ? input.body : input;\nconst items = body.items || [];\nconst out = [];\nfor (const it of items) {\n  let phone = it.action === 'escalate' ? '<YOUR_OWNER_NUMBER>@s.whatsapp.net' : String(it.to || '');\n  if (phone && phone.indexOf('@') === -1) phone += '@s.whatsapp.net';\n  out.push({ json: {\n    wid: it.wid || null,\n    action: it.action || 'reply',\n    phone: phone,\n    message: String(it.message || ''),\n    file_url: it.file_url ? String(it.file_url) : '',\n    file_type: it.file_type === 'image' ? 'image' : 'file'\n  }});\n}\nreturn out;"
+      },
+      "id": "74f6830d-b0d4-434d-9632-bf1eacda17bf",
+      "name": "Build send requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://<YOUR_GOWA_DOMAIN>/send/message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Device-Id",
+              "value": "<YOUR_DEVICE_ID>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "545eb5cb-d64d-4321-b245-38bfa2fccd4c",
+      "name": "Send via GOWA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        160
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "t9GFPFiELUVMgGa2",
+          "name": "GoWA Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect the wids that were just sent so the next node can ack them\n// from WF1's queue. Emits ONE item: {mode:'ack', wids, sent}.\nconst built = $('Build send requests').all();\nconst wids = [];\nfor (const b of built) {\n  const wid = b.json && b.json.wid;\n  if (wid) wids.push(wid);\n}\nreturn [{ json: { mode: 'ack', wids: wids, sent: wids.length } }];"
+      },
+      "id": "69beb8a1-03cd-4192-905b-4b27026d9a0a",
+      "name": "Code in JavaScript1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://<YOUR_N8N_DOMAIN>/webhook/gowa-queue-ops-<TOKEN_A>",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "200cb418-13e8-4bee-adba-b5039707e518",
+      "name": "Ack queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        624,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "e0c32e8b-f400-4470-8d4b-4f55ff207339",
+              "leftValue": "={{ $json.file_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b911bc7e-ebb6-461f-9e32-f4caefa4e21a",
+      "name": "Has attachment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "523fabf9-d90e-49cb-be3e-d637c664503f",
+              "leftValue": "={{ $json.file_type }}",
+              "rightValue": "image",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aefdf734-9a40-49d0-a322-6331bcd47fd9",
+      "name": "Is image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://<YOUR_GOWA_DOMAIN>/send/image",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Device-Id",
+              "value": "<YOUR_DEVICE_ID>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "image_url",
+              "value": "={{ $json.file_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ca8f4149-31ff-48e2-afdc-36b035cc1bac",
+      "name": "Send image via GOWA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1040,
+        0
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "t9GFPFiELUVMgGa2",
+          "name": "GoWA Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://<YOUR_GOWA_DOMAIN>/send/file",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Device-Id",
+              "value": "<YOUR_DEVICE_ID>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "file_url",
+              "value": "={{ $json.file_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8da53d89-3c43-4b1b-b4b9-8c7ccb559944",
+      "name": "Send file via GOWA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1040,
+        160
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "t9GFPFiELUVMgGa2",
+          "name": "GoWA Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "muse-media-dl-<TOKEN_B>",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        288,
+        288
+      ],
+      "id": "59a6d165-3fbc-461a-a303-7fd812c85c3c",
+      "name": "Media DL Webhook",
+      "webhookId": "800a83ae-2965-4251-aa64-fa6cdbe581b9"
+    },
+    {
+      "parameters": {
+        "url": "=https://<YOUR_GOWA_DOMAIN>/message/{{ $json.body.message_id }}/download?phone={{ $json.body.phone }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Device-Id",
+              "value": "<YOUR_DEVICE_ID>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        656,
+        432
+      ],
+      "id": "af44338c-b1bd-4300-bf73-ae1e76c91b12",
+      "name": "GOWA Download",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "t9GFPFiELUVMgGa2",
+          "name": "GoWA Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "muse-audio-transcribe-<TOKEN_C>",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        432,
+        432
+      ],
+      "id": "7b751af4-6920-4048-a285-5dcb24a89c7e",
+      "name": "Audio Transcribe",
+      "webhookId": "800a83ae-2965-4251-aa64-fa6cdbe581b9"
+    },
+    {
+      "parameters": {
+        "url": "=https://<YOUR_GOWA_DOMAIN>/{{  $json.body.audio_path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Device-Id",
+              "value": "<YOUR_DEVICE_ID>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        448
+      ],
+      "id": "5cb87799-9131-4c57-93e5-5814fcb74a81",
+      "name": "Download Audio from GOWA",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "t9GFPFiELUVMgGa2",
+          "name": "GoWA Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "language",
+              "value": "id"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1248,
+        448
+      ],
+      "id": "e45bc449-5018-4454-ad8d-d8874aa23c9a",
+      "name": "Transcribe via Whisper",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "relkosSrNCAtQBfJ",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.text ?? '';return [{ json: { transcript: text, success: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        448
+      ],
+      "id": "6b1a086f-4dc1-4aec-891b-c9e33dd05097",
+      "name": "Format Response"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const binaryData = $input.item.binary?.data;\nif (binaryData && typeof binaryData.fileName === 'string' && binaryData.fileName.toLowerCase().endsWith('.oga')) {\n  binaryData.fileName = binaryData.fileName.slice(0, -4) + '.ogg';\n}\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        448
+      ],
+      "id": "d4867d3f-6613-4d49-a4f3-fa0e9110a434",
+      "name": "Rename to ogg"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Muse Inbox": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Muse Outbox": {
+      "main": [
+        [
+          {
+            "node": "Build send requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build send requests": {
+      "main": [
+        [
+          {
+            "node": "Has attachment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via GOWA": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Ack queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has attachment?": {
+      "main": [
+        [
+          {
+            "node": "Is image?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send via GOWA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is image?": {
+      "main": [
+        [
+          {
+            "node": "Send image via GOWA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send file via GOWA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send image via GOWA": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send file via GOWA": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media DL Webhook": {
+      "main": [
+        [
+          {
+            "node": "GOWA Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Download Audio from GOWA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio from GOWA": {
+      "main": [
+        [
+          {
+            "node": "Rename to ogg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe via Whisper": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rename to ogg": {
+      "main": [
+        [
+          {
+            "node": "Transcribe via Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d522b499-d88b-45a3-b467-f23f15ad59d2",
+  "meta": {
+    "instanceId": "ed46ba29b4aa6fbe392eee01878cd745c7cfbeb1084ac5beb84466d5b45e0936"
+  },
+  "nodeGroups": [],
+  "id": "RasbaGZdoT1v6BGb",
+  "tags": []
+}
